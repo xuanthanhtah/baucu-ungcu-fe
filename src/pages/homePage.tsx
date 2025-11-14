@@ -227,14 +227,14 @@ export default function HomePage(): JSX.Element {
 
           <Row className="mb-4">
             <Col span={24}>
-              <Space className="w-full" direction="horizontal">
+              <div style={{ display: "flex", gap: 8, width: "50%" }}>
                 <AutoComplete
+                  style={{ flex: 1 }}
                   value={value}
                   options={options}
                   onSelect={(val) => setValue(val)}
                   onSearch={handleSearch}
                   filterOption={false}
-                  style={{ width: "300px" }}
                 >
                   <Input
                     placeholder="Nhập tên và nhấn Enter hoặc nhấn Lưu"
@@ -246,12 +246,10 @@ export default function HomePage(): JSX.Element {
                   />
                 </AutoComplete>
 
-                <div className="flex justify-end">
-                  <Button type="primary" onClick={handleSave}>
-                    Lưu
-                  </Button>
-                </div>
-              </Space>
+                <Button type="primary" onClick={handleSave}>
+                  Lưu
+                </Button>
+              </div>
             </Col>
           </Row>
         </Card>
