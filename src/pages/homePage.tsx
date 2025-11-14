@@ -227,9 +227,9 @@ export default function HomePage(): JSX.Element {
 
           <Row className="mb-4">
             <Col span={24}>
-              <div style={{ display: "flex", gap: 8, width: "50%" }}>
+              <div className="flex gap-2 w-full md:w-1/2">
                 <AutoComplete
-                  style={{ flex: 1 }}
+                  className="flex-1"
                   value={value}
                   options={options}
                   onSelect={(val) => setValue(val)}
