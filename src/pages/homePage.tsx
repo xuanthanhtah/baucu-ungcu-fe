@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AutoComplete,
   Button,
@@ -25,37 +25,24 @@ const STORAGE_KEY = "voters_list_v1";
 
 export default function HomePage(): JSX.Element {
   const [value, setValue] = useState<string>("");
-  const [data, setData] = useState<Voter[]>([]);
-  const [options, setOptions] = useState<{ value: string }[]>([]);
-  const initializedRef = React.useRef(false);
+  const [data, setData] = useState<Voter[]>(() => {
+    if (typeof window === "undefined") return [];
 
-  useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      // ignore empty, explicit 'null' or 'undefined' strings
-      if (!raw || raw === "null" || raw === "undefined") return;
+      if (!raw || raw === "null" || raw === "undefined") return [];
 
       const parsed = JSON.parse(raw);
-      // ensure we only set when parsed data is an array
-      if (Array.isArray(parsed)) {
-        setData(parsed);
-      } else {
-        console.warn(
-          `Unexpected data for localStorage key ${STORAGE_KEY}:`,
-          parsed
-        );
-      }
+      return Array.isArray(parsed) ? parsed : [];
     } catch (err) {
       console.error("Failed to read voters from localStorage", err);
+      return [];
     }
-    // mark initialized so save-effect won't run on initial mount
-    initializedRef.current = true;
-  }, []);
+  });
+
+  const [options, setOptions] = useState<{ value: string }[]>([]);
 
   useEffect(() => {
-    // don't write to localStorage on initial mount (avoids overwriting existing data)
-    if (!initializedRef.current) return;
-
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (err) {
