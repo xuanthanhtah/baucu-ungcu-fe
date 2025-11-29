@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AutoComplete,
   Button,
-  Input,
   Space,
   Table,
   message,
@@ -14,43 +12,82 @@ import {
   Modal,
   Divider,
   Empty,
+  Select,
 } from "antd";
+import { supabase } from "../supabaseClient";
 
 type Voter = {
   name: string;
   votes: number;
 };
 
-const STORAGE_KEY = "voters_list_v1";
-
 export default function HomePage(): JSX.Element {
-  const [value, setValue] = useState<string>("");
-  const [data, setData] = useState<Voter[]>(() => {
-    if (typeof window === "undefined") return [];
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [candidates, setCandidates] = useState<string[]>([]);
+  const [users, setUsers] = useState<{ id: number; name: string }[]>([]);
+  const [currentUser, setCurrentUser] = useState<number | null>(null);
+  const [data, setData] = useState<Voter[]>([]);
 
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw || raw === "null" || raw === "undefined") return [];
+  // Fetch candidates and users list
+  useEffect(() => {
+    async function fetchData() {
+      // Fetch candidates
+      const { data: ung_vien, error: err1 } = await supabase
+        .from("ung_vien")
+        .select("*");
 
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (err) {
-      console.error("Failed to read voters from localStorage", err);
-      return [];
+      if (err1) {
+        console.error("Error fetching candidates:", err1);
+        message.error("Không thể tải danh sách ứng viên");
+      } else if (ung_vien) {
+        setCandidates(ung_vien.map((uv: any) => uv.ten_uv));
+      }
+
+      // Fetch users
+      const { data: user_nhap, error: err2 } = await supabase
+        .from("user_nhap")
+        .select("*");
+
+      if (err2) {
+        console.error("Error fetching users:", err2);
+        message.error("Không thể tải danh sách người nhập");
+      } else if (user_nhap) {
+        setUsers(
+          user_nhap.map((u: any) => ({ id: u.id, name: u.ten_user_nhap }))
+        );
+      }
     }
-  });
 
-  const [options, setOptions] = useState<{ value: string }[]>([]);
+    fetchData();
+  }, []);
+
+  // Fetch votes data
+  const fetchVotes = async () => {
+    const { data: list, error } = await supabase.from("danh_sach").select("*");
+
+    if (error) {
+      console.error("Error fetching votes:", error);
+      return;
+    }
+
+    if (list) {
+      // Aggregate votes by candidate name
+      const agg: Record<string, number> = {};
+      list.forEach((item: any) => {
+        agg[item.ung_vien] = (agg[item.ung_vien] || 0) + item.so_phieu;
+      });
+
+      const result = Object.keys(agg).map((name) => ({
+        name,
+        votes: agg[name],
+      }));
+      setData(result);
+    }
+  };
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch (err) {
-      console.error("Failed to save voters to localStorage", err);
-    }
-  }, [data]);
-
-  const names = useMemo(() => data.map((d) => d.name), [data]);
+    fetchVotes();
+  }, []);
 
   const totalVoters = useMemo(() => data.length, [data]);
   const totalVotes = useMemo(
@@ -62,43 +99,119 @@ export default function HomePage(): JSX.Element {
     return [...data].sort((a, b) => (b.votes || 0) - (a.votes || 0));
   }, [data]);
 
-  function handleSave() {
-    const name = value.trim();
-    if (!name) {
-      message.warning("Vui lòng nhập tên");
+  async function handleSave() {
+    if (!currentUser) {
+      message.warning("Vui lòng chọn người nhập liệu");
       return;
     }
 
-    setData((prev) => {
-      const idx = prev.findIndex(
-        (p) => p.name.toLowerCase() === name.toLowerCase()
-      );
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], votes: next[idx].votes + 1 };
-        message.success(`Cập nhật ${name}: +1 phiếu`);
-        return next;
+    // Lọc ra những người KHÔNG được chọn (những người còn lại)
+    const remainingNames = candidates.filter((c) => !selectedNames.includes(c));
+
+    if (remainingNames.length === 0) {
+      message.warning("Bạn đã loại bỏ tất cả ứng viên");
+      return;
+    }
+
+    try {
+      // Get the latest lan_nhap
+      const { data: latestEntry, error: latestError } = await supabase
+        .from("danh_sach")
+        .select("lan_nhap")
+        .order("lan_nhap", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestError) {
+        console.error("Error fetching latest lan_nhap:", latestError);
+        message.error("Lỗi khi lấy lần nhập mới nhất");
+        return;
       }
 
-      const next = [...prev, { name, votes: 1 }];
-      message.success(`Thêm ${name} với 1 phiếu`);
-      return next;
-    });
+      const nextLanNhap = (latestEntry?.lan_nhap || 0) + 1;
 
-    setValue("");
+      const inserts = remainingNames.map((name) => ({
+        user_nhap: currentUser,
+        ung_vien: name,
+        so_phieu: 1,
+        lan_nhap: nextLanNhap,
+      }));
+
+      const { error } = await supabase.from("danh_sach").insert(inserts);
+
+      if (error) throw error;
+
+      message.success(
+        `Đã thêm phiếu cho ${remainingNames.length} người (đã loại ${selectedNames.length}) - Lần nhập: ${nextLanNhap}`
+      );
+      setSelectedNames([]);
+      fetchVotes();
+    } catch (err) {
+      console.error("Error saving votes:", err);
+      message.error("Lỗi khi lưu phiếu bầu");
+    }
   }
 
-  function handleSearch(searchText: string) {
-    if (!searchText) {
-      setOptions([]);
+  async function updateVote(record: Voter, delta: number) {
+    if (!currentUser) {
+      message.warning(
+        "Vui lòng chọn người nhập liệu để thực hiện hành động này"
+      );
       return;
     }
-    const q = searchText.toLowerCase();
-    const matched = names
-      .filter((n) => n.toLowerCase().includes(q))
-      .slice(0, 10)
-      .map((v) => ({ value: v }));
-    setOptions(matched);
+
+    try {
+      // Find the record for this user and candidate
+      const { data: existing, error } = await supabase
+        .from("danh_sach")
+        .select("*")
+        .eq("user_nhap", currentUser)
+        .eq("ung_vien", record.name)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      if (existing) {
+        const newVotes = Math.max(0, existing.so_phieu + delta);
+        await supabase
+          .from("danh_sach")
+          .update({ so_phieu: newVotes })
+          .eq("id", existing.id);
+      } else {
+        if (delta > 0) {
+          await supabase.from("danh_sach").insert([
+            {
+              user_nhap: currentUser,
+              ung_vien: record.name,
+              so_phieu: delta,
+            },
+          ]);
+        }
+      }
+      message.success(`Đã cập nhật phiếu cho ${record.name}`);
+      fetchVotes();
+    } catch (err) {
+      console.error("Error updating vote:", err);
+      message.error("Lỗi cập nhật phiếu");
+    }
+  }
+
+  async function deleteCandidate(name: string) {
+    try {
+      // Delete all records for this candidate (global delete)
+      const { error } = await supabase
+        .from("danh_sach")
+        .delete()
+        .eq("ung_vien", name);
+
+      if (error) throw error;
+
+      message.info(`${name} đã bị xóa`);
+      fetchVotes();
+    } catch (err) {
+      console.error("Error deleting candidate:", err);
+      message.error("Lỗi xóa ứng viên");
+    }
   }
 
   const columns = [
@@ -126,44 +239,17 @@ export default function HomePage(): JSX.Element {
       width: 180,
       render: (_: any, record: Voter) => (
         <Space>
-          <Button
-            size="small"
-            onClick={() => {
-              // giảm 1 phiếu cho bản ghi này (không âm)
-              setData((prev) =>
-                prev.map((p) =>
-                  p.name === record.name
-                    ? { ...p, votes: Math.max(0, p.votes - 1) }
-                    : p
-                )
-              );
-              message.success(`${record.name}: -1 phiếu`);
-            }}
-          >
+          <Button size="small" onClick={() => updateVote(record, -1)}>
             -1
           </Button>
 
-          <Button
-            size="small"
-            onClick={() => {
-              // thêm 1 phiếu cho bản ghi này
-              setData((prev) =>
-                prev.map((p) =>
-                  p.name === record.name ? { ...p, votes: p.votes + 1 } : p
-                )
-              );
-              message.success(`${record.name}: +1 phiếu`);
-            }}
-          >
+          <Button size="small" onClick={() => updateVote(record, 1)}>
             +1
           </Button>
 
           <Popconfirm
             title={`Xóa "${record.name}" khỏi danh sách?`}
-            onConfirm={() => {
-              setData((prev) => prev.filter((p) => p.name !== record.name));
-              message.info(`${record.name} đã bị xóa`);
-            }}
+            onConfirm={() => deleteCandidate(record.name)}
             okText="Xóa"
             cancelText="Hủy"
           >
@@ -176,18 +262,63 @@ export default function HomePage(): JSX.Element {
     },
   ];
 
-  function confirmReset() {
-    Modal.confirm({
-      title: "Xác nhận xóa toàn bộ dữ liệu",
-      content: "Hành động này sẽ xóa toàn bộ danh sách và không thể hoàn tác.",
-      okText: "Xóa tất cả",
-      okButtonProps: { danger: true },
-      cancelText: "Hủy",
-      onOk() {
-        setData([]);
-        message.success("Đã xóa toàn bộ dữ liệu");
-      },
-    });
+  async function handleUndo() {
+    if (!currentUser) {
+      message.warning("Vui lòng chọn người nhập liệu để hoàn tác");
+      return;
+    }
+
+    try {
+      // Find the latest lan_nhap for this user
+      const { data: latestEntry, error: latestError } = await supabase
+        .from("danh_sach")
+        .select("lan_nhap")
+        .eq("user_nhap", currentUser)
+        .order("lan_nhap", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestError) {
+        console.error("Error fetching latest lan_nhap:", latestError);
+        message.error("Lỗi khi lấy lần nhập mới nhất");
+        return;
+      }
+
+      if (!latestEntry) {
+        message.info("Không có dữ liệu để hoàn tác cho người dùng này");
+        return;
+      }
+
+      const latestLanNhap = latestEntry.lan_nhap;
+
+      Modal.confirm({
+        title: "Xác nhận hoàn tác",
+        content: `Bạn có chắc chắn muốn xóa lần nhập thứ ${latestLanNhap} của người dùng này không?`,
+        okText: "Hoàn tác",
+        okButtonProps: { danger: true },
+        cancelText: "Hủy",
+        onOk: async () => {
+          try {
+            const { error } = await supabase
+              .from("danh_sach")
+              .delete()
+              .eq("user_nhap", currentUser)
+              .eq("lan_nhap", latestLanNhap);
+
+            if (error) throw error;
+
+            message.success(`Đã hoàn tác lần nhập thứ ${latestLanNhap}`);
+            fetchVotes();
+          } catch (err) {
+            console.error("Error undoing:", err);
+            message.error("Lỗi khi hoàn tác");
+          }
+        },
+      });
+    } catch (err) {
+      console.error("Error in handleUndo:", err);
+      message.error("Lỗi hệ thống");
+    }
   }
 
   return (
@@ -201,8 +332,15 @@ export default function HomePage(): JSX.Element {
 
             <Col>
               <Space>
-                <Button onClick={confirmReset} danger>
-                  Reset
+                <Select
+                  style={{ width: 200 }}
+                  placeholder="Chọn người nhập liệu"
+                  value={currentUser || undefined}
+                  onChange={setCurrentUser}
+                  options={users.map((u) => ({ label: u.name, value: u.id }))}
+                />
+                <Button onClick={handleUndo} danger>
+                  Undo
                 </Button>
               </Space>
             </Col>
@@ -227,24 +365,23 @@ export default function HomePage(): JSX.Element {
 
           <Row className="mb-4">
             <Col span={24}>
-              <div className="flex gap-2 w-full md:w-1/2">
-                <AutoComplete
+              <div className="flex gap-2 w-full">
+                <Select
+                  mode="multiple"
                   className="flex-1"
-                  value={value}
-                  options={options}
-                  onSelect={(val) => setValue(val)}
-                  onSearch={handleSearch}
-                  filterOption={false}
-                >
-                  <Input
-                    placeholder="Nhập tên và nhấn Enter hoặc nhấn Lưu"
-                    onChange={(e) => setValue(e.target.value)}
-                    onPressEnter={handleSave}
-                    value={value}
-                    autoFocus
-                    allowClear
-                  />
-                </AutoComplete>
+                  placeholder="Chọn người để GẠCH TÊN (những người còn lại sẽ được bầu)"
+                  value={selectedNames}
+                  onChange={setSelectedNames}
+                  options={candidates.map((name) => ({
+                    label: name,
+                    value: name,
+                  }))}
+                  filterOption={(input, option) =>
+                    (option?.label ?? "")
+                      .toLowerCase()
+                      .includes(input.toLowerCase())
+                  }
+                />
 
                 <Button type="primary" onClick={handleSave}>
                   Lưu
