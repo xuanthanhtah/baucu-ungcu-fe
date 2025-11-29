@@ -27,6 +27,7 @@ export default function HomePage(): JSX.Element {
   const [users, setUsers] = useState<{ id: number; name: string }[]>([]);
   const [currentUser, setCurrentUser] = useState<number | null>(null);
   const [data, setData] = useState<Voter[]>([]);
+  const [maxLanNhap, setMaxLanNhap] = useState<number>(0);
 
   // Fetch candidates and users list
   useEffect(() => {
@@ -82,6 +83,20 @@ export default function HomePage(): JSX.Element {
         votes: agg[name],
       }));
       setData(result);
+
+      // Get max lan_nhap
+      const { data: maxData } = await supabase
+        .from("danh_sach")
+        .select("lan_nhap")
+        .order("lan_nhap", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (maxData) {
+        setMaxLanNhap(maxData.lan_nhap);
+      } else {
+        setMaxLanNhap(0);
+      }
     }
   };
 
@@ -349,13 +364,16 @@ export default function HomePage(): JSX.Element {
           <Divider />
 
           <Row gutter={12} className="mb-4">
-            <Col span={8}>
+            <Col span={6}>
               <Statistic title="Số người" value={totalVoters} />
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Statistic title="Tổng số phiếu" value={totalVotes} />
             </Col>
-            <Col span={8}>
+            <Col span={6}>
+              <Statistic title="Tổng số lần nhập" value={maxLanNhap} />
+            </Col>
+            <Col span={6}>
               <Statistic
                 title="Người dẫn đầu"
                 value={sortedData[0] ? sortedData[0].name : "—"}
@@ -365,28 +383,40 @@ export default function HomePage(): JSX.Element {
 
           <Row className="mb-4">
             <Col span={24}>
-              <div className="flex gap-2 w-full">
-                <Select
-                  mode="multiple"
-                  className="flex-1"
-                  placeholder="Chọn người để GẠCH TÊN (những người còn lại sẽ được bầu)"
-                  value={selectedNames}
-                  onChange={setSelectedNames}
-                  options={candidates.map((name) => ({
-                    label: name,
-                    value: name,
-                  }))}
-                  filterOption={(input, option) =>
-                    (option?.label ?? "")
-                      .toLowerCase()
-                      .includes(input.toLowerCase())
-                  }
-                />
-
-                <Button type="primary" onClick={handleSave}>
-                  Lưu
-                </Button>
+              <div className="mb-2 font-medium">
+                Chọn người để GẠCH TÊN (những người còn lại sẽ được bầu):
               </div>
+              <div className="grid grid-cols-5 gap-4 mb-4">
+                {candidates.map((name) => {
+                  const isSelected = selectedNames.includes(name);
+                  return (
+                    <div
+                      key={name}
+                      onClick={() => {
+                        setSelectedNames((prev) =>
+                          prev.includes(name)
+                            ? prev.filter((n) => n !== name)
+                            : [...prev, name]
+                        );
+                      }}
+                      className={`
+                        cursor-pointer border rounded p-4 text-center transition-all select-none
+                        ${
+                          isSelected
+                            ? "bg-red-50 border-red-500 text-red-500 line-through opacity-60"
+                            : "bg-white border-gray-200 hover:border-blue-500 hover:shadow-sm"
+                        }
+                      `}
+                    >
+                      {name}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <Button type="primary" block size="large" onClick={handleSave}>
+                Lưu phiếu bầu
+              </Button>
             </Col>
           </Row>
         </Card>
