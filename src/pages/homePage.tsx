@@ -128,6 +128,11 @@ export default function HomePage(): JSX.Element {
       return;
     }
 
+    if (selectedNames.length < 3) {
+      message.warning("Phải gạch tên ít nhất 3 người");
+      return;
+    }
+
     try {
       // Get the latest lan_nhap
       const { data: latestEntry, error: latestError } = await supabase
